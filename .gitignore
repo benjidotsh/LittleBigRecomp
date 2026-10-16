@@ -1,6 +1,7 @@
 # Game-derived material never goes in the repo
 game/
 vfs
+disc/
 analysis/
 src/recomp/
 src/gen/
@@ -13,3 +14,5 @@ hdd/
 *.log
 frames/
 .DS_Store
+run/
+__pycache__/

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Run the port. The disc stays read-only: guest writes (/dev_hdd0 install data,
+# /dev_hdd1 cache, saves) land in hdd/, which sees the disc through a symlink.
+cd "$(dirname "$0")"
+mkdir -p hdd
+[ -e hdd/PS3_GAME ] || ln -s "$(cd disc && pwd)/PS3_GAME" hdd/PS3_GAME
+export PS3_VFS_ROOT="${PS3_VFS_ROOT:-$PWD/hdd}"
+export PS3_DEV_FLASH="${PS3_DEV_FLASH:-$HOME/Library/Application Support/rpcs3/dev_flash}"
+exec ./build/LittleBigRecomp game/EBOOT.elf "$@"

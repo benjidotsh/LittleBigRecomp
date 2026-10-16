@@ -1083,7 +1083,36 @@ static LONG WINAPI vm_commit_veh(EXCEPTION_POINTERS* ep)
 }
 #endif
 
+#ifdef __APPLE__
+/* AppKit/Metal must own the main thread: the backend creates its window and
+ * pumps events with dispatch_sync onto the main queue, which deadlocks if the
+ * main thread is busy running guest code. So the guest gets its own thread
+ * (with a deep stack -- every guest call is a host call) and the main thread
+ * runs a CFRunLoop, which services the main dispatch queue on this thread
+ * (dispatch_main() would retire it and hand the queue to a worker). */
+#include <pthread.h>
+#include <CoreFoundation/CoreFoundation.h>
+static int guest_main(int argc, char** argv);
+struct GuestArgs { int argc; char** argv; };
+static void* guest_thread(void* p)
+{
+    GuestArgs* a = (GuestArgs*)p;
+    exit(guest_main(a->argc, a->argv));
+}
 int main(int argc, char** argv)
+{
+    static GuestArgs args = { argc, argv };
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, (size_t)512 << 20);
+    pthread_t t;
+    if (pthread_create(&t, &attr, guest_thread, &args) != 0) return 1;
+    for (;;) CFRunLoopRun();
+}
+static int guest_main(int argc, char** argv)
+#else
+int main(int argc, char** argv)
+#endif
 {
     /* <PPU ELF> [--username NAME] [--psnr host[:port]], flags in any order. */
     const char* elf = NULL;

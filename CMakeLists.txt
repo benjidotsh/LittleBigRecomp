@@ -60,7 +60,3 @@ if(SPU_SOURCES)
         COMPILE_DEFINITIONS SPU_USE_DISPATCH_MT
         COMPILE_OPTIONS "-w")
 endif()
-# Every guest call is a host call, so recompiled call chains nest deeply.
-if(APPLE)
-    target_link_options(LittleBigRecomp PRIVATE -Wl,-stack_size,0x10000000)
-endif()

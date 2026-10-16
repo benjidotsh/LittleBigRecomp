@@ -515,6 +515,9 @@ int64_t sys_ppu_thread_exit(ppu_context* ctx)
     uint64_t tid = ctx->thread_id;
     fprintf(stderr, "[SYS] sys_ppu_thread_exit(tid=%llu status=%llu)\n",
             (unsigned long long)tid, (unsigned long long)status);
+    { extern void fn_trace_dump(unsigned, int) __attribute__((weak));
+      if (fn_trace_dump && getenv("FN_TRACE_EXIT")) { fn_trace_dump((unsigned)tid, 65536);
+        for (unsigned o = 1; o < 20; o++) if (o != tid) fn_trace_dump(o, 64); } }
 
     table_lock();
     ppu_thread_info* t = find_thread(tid);
