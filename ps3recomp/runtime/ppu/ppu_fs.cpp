@@ -84,6 +84,7 @@ extern "C" const char* ppu_vfs_root = ".";
 #define CELL_FS_ENOENT       (-2147418106)   /* 0x80010006 -- was -2147418090, which is 0x80010016 = CELL_ENOTCONN, not ENOENT */
 #define CELL_FS_EISDIR       (-2147418094)   /* 0x80010012 */
 #define CELL_FS_EIO          (-2147418111)
+#define CELL_FS_EBADF        ((int32_t)0x8001002A)
 #define CELL_FS_ENOSYS       (-2147418109)   /* 0x80010003 */
 #define CELL_FS_S_IFDIR      0x4000u
 #define CELL_FS_S_IFREG      0x8000u
@@ -771,16 +772,48 @@ static void cellFsMkdir(ppu_context* ctx)
     ctx->gpr[3] = CELL_OK;   /* existing dir is benign for boot */
 }
 static void cellFsRmdir(ppu_context* ctx)  { ctx->gpr[3] = CELL_OK; }
-static void cellFsUnlink(ppu_context* ctx) { ctx->gpr[3] = CELL_OK; }
+static void cellFsUnlink(ppu_context* ctx)
+{
+    char gpath[1024], hpath[1100];
+    guest_strcpy(gpath, (uint32_t)ctx->gpr[3], sizeof gpath);
+    host_path(hpath, sizeof hpath, gpath);
+    ctx->gpr[3] = unlink(hpath) == 0 ? CELL_OK : (uint64_t)(int64_t)CELL_FS_ENOENT;
+}
+/* Ftruncate and Rename lived only in libs/filesystem/cellFs.c, whose fd table
+ * is not this one: an Ftruncate on an fd from cellFsOpen above was EBADF, so
+ * LBP's 4.5 MB output/quick cache files stayed empty and its save logic
+ * judged every first boot "Save Data is Corrupt". */
+static void cellFsFtruncate(ppu_context* ctx)
+{
+    int fd = (int)(uint32_t)ctx->gpr[3];
+    uint64_t size = ctx->gpr[4];
+    if (fd < 0 || fd >= FS_MAX || !g_files[fd]) { ctx->gpr[3] = (uint64_t)(int64_t)CELL_FS_EBADF; return; }
+    fflush(g_files[fd]);
+    ctx->gpr[3] = ftruncate(fileno(g_files[fd]), (off_t)size) == 0 ? CELL_OK : (uint64_t)(int64_t)CELL_FS_EIO;
+}
+static void cellFsRename(ppu_context* ctx)
+{
+    char g1[1024], g2[1024], h1[1100], h2[1100];
+    guest_strcpy(g1, (uint32_t)ctx->gpr[3], sizeof g1);
+    guest_strcpy(g2, (uint32_t)ctx->gpr[4], sizeof g2);
+    host_path(h1, sizeof h1, g1);
+    host_path(h2, sizeof h2, g2);
+    ctx->gpr[3] = rename(h1, h2) == 0 ? CELL_OK : (uint64_t)(int64_t)CELL_FS_ENOENT;
+}
 static void cellFsFsync(ppu_context* ctx)
 {
     int fd = (int)(uint32_t)ctx->gpr[3];
     if (fd >= 0 && fd < FS_MAX && g_files[fd]) fflush(g_files[fd]);
     ctx->gpr[3] = CELL_OK;
 }
-/* File-area preallocation (LBP cache warm-up spams this): host filesystems
- * grow files on write, so accepting is correct -- no preallocation needed. */
-static void cellFsAllocateFileAreaWithoutZeroFill(ppu_context* ctx) { ctx->gpr[3] = CELL_OK; }
+/* (path, u64 size): sets the file's size, as lv2 does (RPCS3 truncates). */
+static void cellFsAllocateFileAreaWithoutZeroFill(ppu_context* ctx)
+{
+    char gpath[1024], hpath[1100];
+    guest_strcpy(gpath, (uint32_t)ctx->gpr[3], sizeof gpath);
+    host_path(hpath, sizeof hpath, gpath);
+    ctx->gpr[3] = truncate(hpath, (off_t)ctx->gpr[4]) == 0 ? CELL_OK : (uint64_t)(int64_t)CELL_FS_ENOENT;
+}
 
 /* Free space for (path, u32* block_size, u64* free_block_count). Unregistered,
  * the call took the unresolved-NID path: CELL_OK with both out-params left as
@@ -902,6 +935,8 @@ extern "C" void ppu_fs_register(void)
     ps3_hle_register_ctx(ps3_compute_nid("cellFsMkdir"),    "cellFsMkdir",    cellFsMkdir);
     ps3_hle_register_ctx(ps3_compute_nid("cellFsRmdir"),    "cellFsRmdir",    cellFsRmdir);
     ps3_hle_register_ctx(ps3_compute_nid("cellFsUnlink"),   "cellFsUnlink",   cellFsUnlink);
+    ps3_hle_register_ctx(ps3_compute_nid("cellFsFtruncate"), "cellFsFtruncate", cellFsFtruncate);
+    ps3_hle_register_ctx(ps3_compute_nid("cellFsRename"),    "cellFsRename",    cellFsRename);
     ps3_hle_register_ctx(ps3_compute_nid("cellFsFsync"),    "cellFsFsync",    cellFsFsync);
     ps3_hle_register_ctx(ps3_compute_nid("cellFsGetFreeSize"),   "cellFsGetFreeSize",   cellFsGetFreeSize);
     ps3_hle_register_ctx(ps3_compute_nid("cellFsChmod"),         "cellFsChmod",         cellFsChmod);
