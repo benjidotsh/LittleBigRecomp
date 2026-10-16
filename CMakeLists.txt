@@ -20,6 +20,10 @@ add_subdirectory("${PS3RECOMP_DIR}" "${CMAKE_BINARY_DIR}/ps3recomp_sdk" EXCLUDE_
 file(GLOB RECOMP_SOURCES "src/recomp/*.cpp")
 file(GLOB GEN_SOURCES    "src/gen/*.cpp" "src/gen/*.c")
 file(GLOB_RECURSE SPU_SOURCES "src/spu_gen/*.c")
+if(SPU_SOURCES)
+    # musttail indirect-branch fast path; must be built here, by clang.
+    list(APPEND SPU_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/ps3recomp/runtime/spu/spu_dispatch_mt.c")
+endif()
 file(GLOB PORT_SOURCES   "src/port/*.cpp" "src/port/*.c")
 if(NOT RECOMP_SOURCES)
     message(FATAL_ERROR "src/recomp/ is empty -- run tools/relift.sh first")
@@ -56,7 +60,7 @@ target_compile_options(LittleBigRecomp PRIVATE -fno-strict-aliasing -fwrapv -ffp
 set_source_files_properties(${RECOMP_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
 if(SPU_SOURCES)
     set_source_files_properties(${SPU_SOURCES} PROPERTIES
-        INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu"
+        INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu;${PS3RECOMP_DIR}/include"
         COMPILE_DEFINITIONS SPU_USE_DISPATCH_MT
-        COMPILE_OPTIONS "-w")
+        COMPILE_OPTIONS "-w;-O2")
 endif()

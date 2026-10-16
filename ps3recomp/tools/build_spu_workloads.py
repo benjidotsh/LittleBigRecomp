@@ -123,6 +123,10 @@ def main():
     ap.add_argument("--constructor", action="store_true",
                     help="also emit an __attribute__((constructor)) that calls the register fn at startup")
     ap.add_argument("--relift", action="store_true", help="re-lift even if a prior lift exists")
+    ap.add_argument("--return-entries", action="store_true",
+                    help="pass --return-entries to the lifter: every call's return address "
+                         "becomes an entry, so code returning from an interpreted, "
+                         "runtime-loaded callee (FMOD's relocated DSP plugins) rejoins the lift")
     ap.add_argument("--skip-lift", action="store_true",
                     help="do not run the lifter; assume --lifted already populated (still fixes includes + emits registry)")
     ap.add_argument("--allow-partial", action="store_true",
@@ -159,6 +163,8 @@ def main():
             os.makedirs(outdir, exist_ok=True)
             cmd = [sys.executable, args.lifter, e, "--auto-functions", e,
                    "--symbol-prefix", prefix, "-o", outdir]
+            if args.return_entries:
+                cmd += ["--return-entries"]
             if img in extra_funcs:
                 cmd += ["--extra-funcs", extra_funcs[img]]
                 print(f"[build_spu_workloads] {img}: extra entries {extra_funcs[img]}")

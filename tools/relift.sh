@@ -23,3 +23,5 @@ rm -rf src/recomp src/gen && mkdir -p src/recomp src/gen
     --code-end "$CODE_END" --chunks 48 \
     -o src/recomp
 "$PY" "$T/gen_hle_nids.py" --all --out src/gen/ppu_hle_nids.cpp
+"$PY" tools/add_fn_trace.py src/recomp
+PYTHON="$PY" sh tools/relift_spu.sh
