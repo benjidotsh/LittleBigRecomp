@@ -83,6 +83,7 @@ typedef struct {
     int           stream;   /* SOCK_STREAM or SOCK_STREAM_P2P */
     uint16_t      vport;    /* the P2P vport it was bound to */
     int           listening;
+    int           connected; /* connect() or accept() completed */
 } net_socket_slot;
 
 static net_socket_slot s_sockets[SYS_NET_MAX_SOCKETS];
@@ -495,6 +496,7 @@ int32_t sys_net_bnet_accept(int32_t s, sys_net_sockaddr* addr, uint32_t* addrlen
     }
     s_sockets[slot].p2p = s_sockets[s].p2p;
     s_sockets[slot].stream = 1;
+    s_sockets[slot].connected = 1;
     if (net_trace()) printf("[sys_net] accept(%d) -> %d\n", s, slot);
     s_sockets[slot].vport = s_sockets[s].vport;
     write_sockaddr(EA(addr), EA(addrlen), &a);
@@ -537,6 +539,25 @@ int32_t sys_net_bnet_connect(int32_t s, const sys_net_sockaddr* addr, uint32_t a
         }
     }
     if (connect(s_sockets[s].host_fd, (struct sockaddr*)&a, sizeof(a)) == HOST_SOCKET_ERROR) {
+        /* A non-blocking connect to this machine completes at once on the
+         * console (and in RPCS3): LittleBigPlanet's local game session
+         * connects its client to its own host over 127.0.0.1 and treats
+         * EINPROGRESS as a failed attempt -- it never polls for writability --
+         * so the session never forms and the first level never starts. Wait
+         * the few microseconds loopback takes and report the result. */
+        if ((ntohl(a.sin_addr.s_addr) >> 24) == 127) {
+            host_pollfd pf; memset(&pf, 0, sizeof pf);
+            pf.fd = s_sockets[s].host_fd; pf.events = POLLOUT;
+            if (host_poll(&pf, 1, 500) == 1) {
+                int err = 0; socklen_t el = sizeof err;
+                getsockopt(s_sockets[s].host_fd, SOL_SOCKET, SO_ERROR, (char*)&err, &el);
+                if (!err) {
+                    s_sockets[s].connected = 1;
+                    if (net_trace()) printf("[sys_net] connect(%d): loopback completed synchronously\n", s);
+                    return 0;
+                }
+            }
+        }
 #ifdef _WIN32
         if (WSAGetLastError() == WSAEWOULDBLOCK) return fail(SYS_NET_EINPROGRESS);
 #endif
@@ -544,6 +565,7 @@ int32_t sys_net_bnet_connect(int32_t s, const sys_net_sockaddr* addr, uint32_t a
         if (net_trace()) printf("[sys_net] connect(%d) failed, errno %d\n", s, s_errno);
         return r;
     }
+    s_sockets[s].connected = 1;
     return 0;
 }
 
@@ -1015,6 +1037,35 @@ uint32_t sys_net_bnet_gethostbyname(const char* name)
     return h;
 }
 
+/* sys_net_get_sockinfo(s, sys_net_sockinfo_t* p, n): fill n records from s
+ * on. Record (36 bytes, big-endian): s, proto, recv_queue_length,
+ * send_queue_length, local_adr, local_port, remote_adr, remote_port, state
+ * (SYS_NET_STATE_*: 2 created, 4 listen, 7 established). Titles poll it for
+ * a connection's state. */
+int32_t sys_net_get_sockinfo(int32_t s, uint32_t p, int32_t n)
+{
+    int32_t done = 0;
+    for (int32_t i = s; done < n && i < SYS_NET_MAX_SOCKETS; i++) {
+        if (!valid_socket(i)) { if (i == s) return fail(SYS_NET_EBADF); continue; }
+        uint32_t r = p + (uint32_t)done * 36;
+        struct sockaddr_in l, rm; socklen_t ll = sizeof l, rl = sizeof rm;
+        memset(&l, 0, sizeof l); memset(&rm, 0, sizeof rm);
+        getsockname(s_sockets[i].host_fd, (struct sockaddr*)&l, &ll);
+        int peer = getpeername(s_sockets[i].host_fd, (struct sockaddr*)&rm, &rl) == 0;
+        vm_write32(r + 0x00, (uint32_t)i);
+        vm_write32(r + 0x04, s_sockets[i].stream ? 6 : 17);
+        vm_write32(r + 0x08, 0);
+        vm_write32(r + 0x0C, 0);
+        vm_write32(r + 0x10, ntohl(l.sin_addr.s_addr));
+        vm_write32(r + 0x14, ntohs(l.sin_port));
+        vm_write32(r + 0x18, ntohl(rm.sin_addr.s_addr));
+        vm_write32(r + 0x1C, ntohs(rm.sin_port));
+        vm_write32(r + 0x20, s_sockets[i].listening ? 4 : (peer || s_sockets[i].connected) ? 7 : 2);
+        done++;
+    }
+    return done;
+}
+
 uint32_t sys_net_errno_loc(void)
 {
     if (scratch(&s_errno_ea, 4)) vm_write32(s_errno_ea, (uint32_t)s_errno);
@@ -1054,6 +1105,7 @@ static void h_inet_addr(ppu_context* ctx)   { RET_U(sys_net_bnet_inet_addr(PTR(3
 static void h_inet_ntoa(ppu_context* ctx)   { RET_U(sys_net_bnet_inet_ntoa(R32(3))); }
 static void h_gethostbyname(ppu_context* ctx) { RET_U(sys_net_bnet_gethostbyname(PTR(3))); }
 static void h_errno_loc(ppu_context* ctx)   { RET_U(sys_net_errno_loc()); }
+static void h_sockinfo(ppu_context* ctx)    { RET_S(sys_net_get_sockinfo(S32(3), R32(4), S32(5))); }
 static void h_h_errno_loc(ppu_context* ctx) { RET_U(scratch(&s_h_errno_ea, 4)); }
 static void h_init(ppu_context* ctx)        { RET_S(sys_net_initialize_network_ex(PTR(3))); }
 static void h_finalize(ppu_context* ctx)    { RET_S(sys_net_finalize_network()); }
@@ -1075,6 +1127,7 @@ void ps3_net_host_register(unsigned int (*guest_alloc)(unsigned int size, unsign
         { "inet_pton", h_inet_pton },
         { "gethostbyname", h_gethostbyname },
         { "_sys_net_errno_loc", h_errno_loc },
+        { "sys_net_get_sockinfo", h_sockinfo },
         { "_sys_net_h_errno_loc", h_h_errno_loc },
         { "sys_net_initialize_network_ex", h_init },
         { "sys_net_finalize_network", h_finalize },

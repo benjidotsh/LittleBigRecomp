@@ -1,5 +1,6 @@
 #include "ppu_recomp.h"
 #include <stdio.h>
+#include <stdlib.h>
 extern "C" void fn_probe_dump_check(unsigned a);
 extern "C" void fn_probe_hit(ppu_context* c, unsigned a)
 {
@@ -8,6 +9,12 @@ extern "C" void fn_probe_hit(ppu_context* c, unsigned a)
             (unsigned long long)c->thread_id, (unsigned)c->lr,
             (unsigned long long)c->gpr[3], (unsigned long long)c->gpr[4],
             (unsigned long long)c->gpr[5], (unsigned long long)c->gpr[6]);
+    static int regs = getenv("FN_PROBE_REGS") != nullptr;
+    if (regs) {
+        for (int i = 0; i < 32; i++)
+            fprintf(stderr, "%sr%d=%08llX", i % 8 ? " " : "\n    ", i, (unsigned long long)c->gpr[i]);
+        fprintf(stderr, "\n");
+    }
 }
 extern "C" void fn_probe_ret(ppu_context* c, unsigned a)
 {
@@ -22,11 +29,8 @@ extern "C" void fn_probe_ret(ppu_context* c, unsigned a)
 #include <string.h>
 extern "C" uint8_t* vm_base;
 static unsigned s_dump_at = []{ const char* e = getenv("FN_DUMP_AT"); return e ? (unsigned)strtoul(e, 0, 16) : 0u; }();
-extern "C" void fn_probe_dump_check(unsigned a)
+static void fn_dump_ranges(void)
 {
-    /* FN_DUMP_AT=<fn>[:<n>] dumps on the n-th entry (default first). */
-    static int seen, nth = []{ const char* e = getenv("FN_DUMP_AT"); const char* c = e ? strchr(e, ':') : 0; return c ? atoi(c + 1) : 1; }();
-    if (a != s_dump_at || ++seen != nth) return;
     const char* r = getenv("FN_DUMP_RANGES");
     if (!r) r = "950000-B20000,40000000-48000000";
     while (*r) {
@@ -42,3 +46,20 @@ extern "C" void fn_probe_dump_check(unsigned a)
         fprintf(stderr, "[probe] dumped %08X-%08X -> %s\n", lo, hi, name);
     }
 }
+
+extern "C" void fn_probe_dump_check(unsigned a)
+{
+    /* FN_DUMP_AT=<fn>[:<n>] dumps on the n-th entry (default first). */
+    static int seen, nth = []{ const char* e = getenv("FN_DUMP_AT"); const char* c = e ? strchr(e, ':') : 0; return c ? atoi(c + 1) : 1; }();
+    if (a != s_dump_at || ++seen != nth) return;
+    fn_dump_ranges();
+}
+
+/* FN_DUMP_SEC=<s>: dump the same ranges once, <s> seconds after start. */
+#include <thread>
+#include <chrono>
+static int s_dump_timer = []{
+    const char* e = getenv("FN_DUMP_SEC");
+    if (e) std::thread([](int sec){ std::this_thread::sleep_for(std::chrono::seconds(sec)); fn_dump_ranges(); }, atoi(e)).detach();
+    return 0;
+}();

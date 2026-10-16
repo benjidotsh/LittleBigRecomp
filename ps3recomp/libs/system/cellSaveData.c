@@ -52,6 +52,13 @@
  * -----------------------------------------------------------------------*/
 
 static char s_save_root[1024] = "./gamedata/dev_hdd0/home/00000001/savedata";
+/* Follow the VFS root when there is one, so saves land where the title's own
+ * /dev_hdd0/home/... paths resolve (ppu_fs maps /dev_hdd0/x to <root>/x). */
+__attribute__((constructor)) static void savedata_root_from_vfs(void)
+{
+    const char* r = getenv("PS3_VFS_ROOT");
+    if (r && *r) snprintf(s_save_root, sizeof s_save_root, "%s/home/00000001/savedata", r);
+}
 
 /* Ensure directory (and parents) exist */
 static void ensure_dirs(const char* path)
@@ -924,8 +931,10 @@ static s32 savedata_execute(const char* dirName, int is_save,
         return CELL_SAVEDATA_ERROR_CBRESULT;
     }
 
-    /* Write PARAM.SFO if stat set provided params and we're saving */
-    if (is_save && statSet.setParam) {
+    /* Write PARAM.SFO whenever the stat callback provides params, load ops
+     * included (as lv2 does): LittleBigPlanet creates its save from inside
+     * an AutoLoad, and without the SFO that save reads as new forever. */
+    if (statSet.setParam) {
         ensure_dirs(save_path);
         CellSaveDataSystemFileParam params;
         memcpy(&params, statSet.setParam, sizeof(params));

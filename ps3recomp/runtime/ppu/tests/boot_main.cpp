@@ -70,6 +70,9 @@ void     ps3_load_prx_modules(void) {}
 #include <string.h>
 #include <stdlib.h>
 #include <signal.h>
+#ifndef _WIN32
+#include <sys/mman.h>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -1168,8 +1171,16 @@ int main(int argc, char** argv)
     vm_base = (uint8_t*)VirtualAlloc(NULL, VM_SIZE, MEM_RESERVE, PAGE_READWRITE);
     ppu_vm_size = 0;   /* full 32-bit space backed -> OOB guard unnecessary */
 #else
-    vm_base = (uint8_t*)calloc(1, 0xE0000000u);
-    ppu_vm_size = 0xE0000000u;
+    /* The full 32-bit guest space plus the top-edge guard, demand-zero. A
+     * 3.5 GB calloc left 0xE0000000+ (RSX reports at 0xFEEDxxxx, among others)
+     * pointing past the allocation into live host memory, which the guest then
+     * silently corrupted. */
+    {
+        void* m = mmap(NULL, VM_SIZE, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+        vm_base = (m == MAP_FAILED) ? nullptr : (uint8_t*)m;
+    }
+    ppu_vm_size = 0;   /* full 32-bit space backed -> OOB guard unnecessary */
 #endif
     if (!vm_base) { printf("vm alloc failed\n"); return 1; }
 

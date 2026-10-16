@@ -9,4 +9,7 @@ export PS3_DEV_FLASH="${PS3_DEV_FLASH:-$HOME/Library/Application Support/rpcs3/d
 # FMOD relocates its codec/DSP plugins into local store at run time; no static
 # lift can exist for those addresses, so they run through the SPU interpreter.
 export SPU_INTERP_UNLIFTED="${SPU_INTERP_UNLIFTED:-1}"
+# LBP runs even single-player as a local network session over loopback
+# sockets; the offline libnet model leaves those calls unanswered.
+export PS3_NET_ONLINE="${PS3_NET_ONLINE:-1}"
 exec ./build/LittleBigRecomp game/EBOOT.elf "$@"
