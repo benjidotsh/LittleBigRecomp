@@ -309,13 +309,17 @@ void rsx_texture_component_remap(u32 control1, u32 rsx_fmt, u8 out[4])
 
     /* Source codes index the presented vector {A,R,G,B}. The uploaded resource
      * holds R,G,B,A at components 0..3, so A is component 3 and R,G,B are
-     * 0,1,2 -- that is what lanes_argb says. G8B8 only has two real channels,
-     * and the sampler presents them as {G,R,G,R}. B8 decodes to a one-channel
+     * 0,1,2 -- that is what lanes_argb says. G8B8 only has two real channels.
+     * It is a big-endian 16-bit texel, G in the high byte: G is the FIRST byte
+     * in memory (component 0 of the byte-for-byte R8G8 upload) and B the
+     * second. Sources A and G read byte 0, R and B byte 1 (RPCS3 byte-swaps
+     * the word and swizzles {G,R,G,R}, which lands on the same bytes). LBP's font atlas keeps its
+     * glyph coverage in G; reading byte 1 there drew noise for every glyph. B8 decodes to a one-channel
      * resource whose byte is presented as R, G and B with an opaque A, which
      * is what the D3D12 live engine's CPU decode builds (decode_texel); read
      * through lanes_argb its B source would be component 2, always zero. */
     static const u8 lanes_argb[4] = {3, 0, 1, 2};
-    static const u8 lanes_g8b8[4] = {1, 0, 1, 0};
+    static const u8 lanes_g8b8[4] = {0, 1, 0, 1};
     static const u8 lanes_b8[4]   = {RSX_REMAP_ONE, 0, 0, 0};
     const u32 base = rsx_fmt & 0x9Fu;
     const u8* src2res = (base == 0x8Bu) ? lanes_g8b8

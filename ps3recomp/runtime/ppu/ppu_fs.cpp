@@ -90,9 +90,10 @@ extern "C" const char* ppu_vfs_root = ".";
 #define CELL_FS_O_RDONLY     0
 #define CELL_FS_O_WRONLY     1
 #define CELL_FS_O_RDWR       2
-#define CELL_FS_O_CREAT      0x0200
-#define CELL_FS_O_TRUNC      0x0400
-#define CELL_FS_O_APPEND     0x0100
+#define CELL_FS_O_CREAT      000100   /* octal, as in lv2 */
+#define CELL_FS_O_EXCL       000200
+#define CELL_FS_O_TRUNC      001000
+#define CELL_FS_O_APPEND     002000
 #define CELL_FS_SEEK_SET     0
 #define CELL_FS_SEEK_CUR     1
 #define CELL_FS_SEEK_END     2
@@ -223,6 +224,7 @@ static void cellFsOpen(ppu_context* ctx)
     if (flags & CELL_FS_O_CREAT)  oflags |= O_CREAT;
     if (flags & CELL_FS_O_TRUNC)  oflags |= O_TRUNC;
     if (flags & CELL_FS_O_APPEND) oflags |= O_APPEND;
+    if (flags & CELL_FS_O_EXCL)   oflags |= O_EXCL;
 
     /* A bare device root ("/dev_bdvd") resolves to a DIRECTORY, and open() on a
      * directory fails on Windows. Real cellFsOpen answers EISDIR there, and a

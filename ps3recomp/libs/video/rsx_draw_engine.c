@@ -931,6 +931,21 @@ static u32 eng_texture_upload(u32 location, u32 offset, u32 fmt, u32 w, u32 h,
                                rsx_texture_argb_is_rgba());
             g.be->texture_upload(g.be->user, handle, f, m, lv[m].w, lv[m].h,
                                  g.tex_staging, tl->dst_row_bytes, tl->rows);
+            /* RSX_TEX_LOG=1: one line per decoded level 0; RSX_TEX_DUMP=<dir>
+             * also writes the decoded bytes as tex_<loc>_<offset>_<fmt>.raw. */
+            if (f == 0 && m == 0 && getenv("RSX_TEX_LOG")) {
+                fprintf(stderr, "[tex] upload loc=%u off=%08X fmt=%02X %ux%u lv=%u pitch=%u cube=%d remap=%08X be=%d rowbytes=%u\n",
+                        location, offset, fmt, w, h, nlv, pitch, cube, remap,
+                        (int)eng_texfmt(lv[0].tl.fmt), tl->dst_row_bytes);
+                const char* dd = getenv("RSX_TEX_DUMP");
+                if (dd) {
+                    char path[512];
+                    snprintf(path, sizeof path, "%s/tex_%u_%08X_%02X_%ux%u_rb%u.raw", dd,
+                             location, offset, fmt, w, h, tl->dst_row_bytes);
+                    FILE* o = fopen(path, "wb");
+                    if (o) { fwrite(g.tex_staging, 1, (size_t)tl->dst_row_bytes * tl->rows, o); fclose(o); }
+                }
+            }
         }
     }
     return handle;

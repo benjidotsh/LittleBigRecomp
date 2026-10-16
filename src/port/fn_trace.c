@@ -39,3 +39,25 @@ __attribute__((constructor)) static void fn_probe_init(void)
         if (*e == ',') e++; else break;
     }
 }
+
+/* FN_TRACE_AT=<sec>: after that many seconds, write every thread's last 64K
+ * function entries to fntrace_<tid>.txt (and a 48-entry tail to stderr). */
+#include <pthread.h>
+#include <unistd.h>
+static void* fn_trace_timer(void* arg)
+{
+    sleep((unsigned)(uintptr_t)arg);
+    for (unsigned t = 1; t < 64; t++) {
+        if (!g_fn_trace_pos[t] && !g_fn_trace[t][65535]) continue;
+        fn_trace_dump(t, 48);
+        fn_trace_dump(t, 65536);
+    }
+    return 0;
+}
+__attribute__((constructor)) static void fn_trace_timer_init(void)
+{
+    const char* e = getenv("FN_TRACE_AT");
+    if (!e) return;
+    pthread_t th;
+    pthread_create(&th, 0, fn_trace_timer, (void*)(uintptr_t)atoi(e));
+}
