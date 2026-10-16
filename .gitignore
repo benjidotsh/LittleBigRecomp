@@ -1,0 +1,15 @@
+# Game-derived material never goes in the repo
+game/
+vfs
+analysis/
+src/recomp/
+src/gen/
+src/spu_gen/
+spu_miss/
+# Build + runtime output
+build/
+build-*/
+hdd/
+*.log
+frames/
+.DS_Store
