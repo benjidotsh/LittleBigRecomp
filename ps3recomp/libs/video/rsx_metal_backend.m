@@ -2269,6 +2269,7 @@ typedef struct {
     float clear_depth;
     u8    clear_stencil;
     u32   resolve_dst;          /* snapshot/resolve destination texture */
+    u32   resolve_argb;         /* depth resolve encodes Z24 as A8R8G8B8 bytes */
 } EngRecord;
 
 static EngRecord s_eng_rec[ENG_MAX_RECORDS];
@@ -2286,6 +2287,7 @@ static id<MTLLibrary>             s_eng_helper_lib;
 static id<MTLRenderPipelineState> s_eng_blit_pso;
 static MTLPixelFormat             s_eng_blit_pso_fmt;
 static id<MTLRenderPipelineState> s_eng_depth_pso;
+static id<MTLRenderPipelineState> s_eng_depth_argb_pso;
 static id<MTLSamplerState>        s_eng_point_sampler;
 
 static NSString* const kEngHelperMSL = @
@@ -2307,6 +2309,12 @@ static NSString* const kEngHelperMSL = @
 "                            depth2d<float> src [[texture(0)]],\n"
 "                            sampler s [[sampler(0)]]) {\n"
 "    return src.sample(s, i.uv);\n"
+"}\n"
+"fragment float4 eng_depth_argb_fs(BOut i [[stage_in]],\n"
+"                                  depth2d<float> src [[texture(0)]]) {\n"
+"    float d = clamp(src.read(uint2(i.pos.xy)), 0.0, 1.0);\n"
+"    uint v = min(uint(rint(d * 16777215.0)), 16777215u);\n"
+"    return float4(float((v >> 8) & 255u), float(v & 255u), 0.0, float(v >> 16)) / 255.0;\n"
 "}\n";
 
 static u32 eng_obj_add(id<MTLTexture> t)
@@ -2453,6 +2461,7 @@ static void eng_shutdown(void* user)
     s_eng_helper_lib = nil;
     s_eng_blit_pso = nil;
     s_eng_depth_pso = nil;
+    s_eng_depth_argb_pso = nil;
     s_eng_point_sampler = nil;
     s_eng_active = 0;
     s_eng_encoding_failed = 0;
@@ -2596,6 +2605,40 @@ static u32 eng_depth_target_create(void* user, u32 w, u32 h)
 /* The sampleable copy of a depth target. The copy is a record in the stream,
  * not an immediate blit, because it has to observe the depth the passes
  * recorded so far actually wrote. */
+static u32 eng_depth_argb_snapshot(void* user, u32 depth, u32 w, u32 h)
+{
+    (void)user;
+    if (!eng_obj(depth) || !s_eng_helper_lib) return 0;
+    if (s_eng_rec_count >= ENG_MAX_RECORDS) { s_eng_dropped++; return 0; }
+    if (!s_eng_depth_argb_pso) {
+        MTLRenderPipelineDescriptor* pd = [MTLRenderPipelineDescriptor new];
+        pd.vertexFunction   = [s_eng_helper_lib newFunctionWithName:@"eng_fullscreen_vs"];
+        pd.fragmentFunction = [s_eng_helper_lib newFunctionWithName:@"eng_depth_argb_fs"];
+        pd.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA8Unorm;
+        NSError* err = nil;
+        s_eng_depth_argb_pso = [s_dev newRenderPipelineStateWithDescriptor:pd error:&err];
+        if (!s_eng_depth_argb_pso) {
+            fprintf(stderr, "[rsx engine/metal] depth->argb pipeline failed: %s\n",
+                    [[err localizedDescription] UTF8String]);
+            return 0;
+        }
+    }
+    MTLTextureDescriptor* td =
+        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                           width:w height:h
+                                                       mipmapped:NO];
+    td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead | MTLTextureUsagePixelFormatView;
+    const u32 dst = eng_obj_add([s_dev newTextureWithDescriptor:td]);
+    if (!dst) return 0;
+    EngRecord* r = &s_eng_rec[s_eng_rec_count++];
+    memset(r, 0, sizeof *r);
+    r->kind = ENG_REC_DEPTH_RESOLVE;
+    r->depth = depth;
+    r->resolve_dst = dst;
+    r->resolve_argb = 1;
+    return dst;
+}
+
 static u32 eng_depth_snapshot(void* user, u32 depth, u32 w, u32 h)
 {
     (void)user;
@@ -3070,14 +3113,15 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
             const EngRecord* r = &s_eng_rec[i++];
             id<MTLTexture> src = eng_obj(r->depth);
             id<MTLTexture> dst = eng_obj(r->resolve_dst);
-            if (!src || !dst || !s_eng_depth_pso) { s_eng_encoding_failed = 1; continue; }
+            id<MTLRenderPipelineState> pso = r->resolve_argb ? s_eng_depth_argb_pso : s_eng_depth_pso;
+            if (!src || !dst || !pso) { s_eng_encoding_failed = 1; continue; }
             MTLRenderPassDescriptor* rp = [MTLRenderPassDescriptor renderPassDescriptor];
             rp.colorAttachments[0].texture     = dst;
             rp.colorAttachments[0].loadAction  = MTLLoadActionDontCare;
             rp.colorAttachments[0].storeAction = MTLStoreActionStore;
             id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:rp];
             if (!e) { s_eng_encoding_failed = 1; continue; }
-            [e setRenderPipelineState:s_eng_depth_pso];
+            [e setRenderPipelineState:pso];
             [e setFragmentTexture:src atIndex:0];
             [e setFragmentSamplerState:s_eng_point_sampler atIndex:0];
             [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
@@ -3475,6 +3519,7 @@ static const rsx_draw_backend s_engine_backend = {
     .depth_target_create  = eng_depth_target_create,
     .depth_target_release = eng_obj_release,
     .depth_snapshot       = eng_depth_snapshot,
+    .depth_argb_snapshot  = eng_depth_argb_snapshot,
     .depth_readback       = eng_depth_readback,
     .color_snapshot       = eng_color_snapshot,
     .pipeline_create      = eng_pipeline_create,

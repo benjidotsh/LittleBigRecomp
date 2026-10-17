@@ -113,6 +113,8 @@ typedef struct {
     int guest_dirty;       /* written since guest memory last got a copy     */
     u32 zfmt, pitch;       /* SURFACE_FORMAT depth field and zeta pitch then */
     u32 used_w, used_h;    /* the clip that write went through              */
+    u32 argb_snap;         /* depth_argb_snapshot of depth_serial argb_serial */
+    u64 argb_serial;
 } eng_zdepth;
 
 typedef struct {
@@ -809,6 +811,8 @@ static u32 eng_zdepth_get(u32 location, u32 offset, u32 rt_w, u32 rt_h)
     z->w = want_w; z->h = want_h;
     z->handle = handle;
     z->snapshot = 0;
+    z->argb_snap = 0;
+    z->argb_serial = 0;
     z->cleared = 0;
     z->had_write = 0;
     z->snapshot_valid = 0;
@@ -876,14 +880,21 @@ static u64 eng_texture_content_hash(u32 location, u32 offset, u32 span,
 {
     const u8* src = span ? eng_guest_ptr(NULL, location, offset, span) : NULL;
     if (!src) { *readable = 0; return 0; }
-    u64 hash = 1469598103934665603ull;
+    /* Four independent lanes: the serial multiply chain of a single FNV
+     * lane was a quarter of the RSX thread once a level's textures were
+     * live (it is latency-bound, not throughput-bound). */
+    u64 h0 = 1469598103934665603ull, h1 = h0 ^ 0x9E3779B97F4A7C15ull,
+        h2 = h0 ^ 0xC2B2AE3D27D4EB4Full, h3 = h0 ^ 0x165667B19E3779F9ull;
     u32 i = 0;
-    for (; i + 8 <= span; i += 8) {
-        u64 word;
-        memcpy(&word, src + i, sizeof(word));
-        hash ^= word;
-        hash *= 1099511628211ull;
+    for (; i + 32 <= span; i += 32) {
+        u64 w[4];
+        memcpy(w, src + i, sizeof(w));
+        h0 = (h0 ^ w[0]) * 1099511628211ull;
+        h1 = (h1 ^ w[1]) * 1099511628211ull;
+        h2 = (h2 ^ w[2]) * 1099511628211ull;
+        h3 = (h3 ^ w[3]) * 1099511628211ull;
     }
+    u64 hash = h0 ^ (h1 * 31) ^ (h2 * 961) ^ (h3 * 29791);
     for (; i < span; i++) { hash ^= src[i]; hash *= 1099511628211ull; }
     *readable = 1;
     return hash;
@@ -1836,6 +1847,33 @@ static u32 sink_bind_textures(const u32* target_slots, u32 n_targets,
                 const u32 snap = eng_zdepth_snapshot((u32)zsrc);
                 if (snap) { textures[u] = snap; continue; }
             }
+            /* Z24S8 read as A8R8G8B8 at the target's own size: encode on the
+             * GPU instead of reading the depth back through guest memory. */
+            if (base_fmt == 0x85u && g.zdepths[zsrc].zfmt == 2u && !t.cubemap &&
+                g.be->depth_argb_snapshot && !rsx_texture_argb_is_rgba() &&
+                g.zdepths[zsrc].had_write &&
+                t.width == g.zdepths[zsrc].w && t.height == g.zdepths[zsrc].h) {
+                eng_zdepth* zz = &g.zdepths[zsrc];
+                if (!zz->argb_snap || zz->argb_serial != zz->depth_serial) {
+                    const u32 snap = g.be->depth_argb_snapshot(g.be->user, zz->handle, zz->w, zz->h);
+                    if (snap) {
+                        if (zz->argb_snap) g.be->texture_release(g.be->user, zz->argb_snap);
+                        zz->argb_snap = snap; zz->argb_serial = zz->depth_serial;
+                    }
+                }
+                if (zz->argb_snap && zz->argb_serial == zz->depth_serial) {
+                    const u32 view = g.be->surface_view
+                        ? g.be->surface_view(g.be->user, zz->argb_snap, t.remap & 0xFFFFu, t.format)
+                        : 0;
+                    textures[u] = view ? view : zz->argb_snap;
+                    continue;
+                }
+            }
+            { static int zl = -1; if (zl < 0) zl = getenv("RSX_ZSAMPLE_LOG") ? 1 : 0;
+              if (zl) { static int n; if (n++ < 40)
+                  fprintf(stderr, "[zsample] unit=%u fmt=0x%02X tex %ux%u depth slot %d (current %u) zfmt=%u at 0x%08X\n",
+                          u, t.format, t.width, t.height, zsrc, current_zslot,
+                          g.zdepths[zsrc].zfmt, t.offset); } }
             if (eng_zdepth_to_guest((u32)zsrc)) {
                 textures[u] = eng_texture_slot(t.location, t.offset, t.format,
                                                t.width, t.height, t.mipmaps, t.pitch,

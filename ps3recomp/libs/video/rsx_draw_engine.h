@@ -154,6 +154,12 @@ typedef struct rsx_draw_backend {
     /* Resolve a depth target into a sampleable texture and return it; 0 when
      * the backend cannot. The engine only asks after a depth-writing draw. */
     u32  (*depth_snapshot)(void* user, u32 depth, u32 w, u32 h);
+    /* Optional: a w x h RGBA8 texture holding the depth target encoded the way
+     * a Z24S8 surface read as A8R8G8B8 decodes (guest bytes d>>16, d>>8, d, 0
+     * -> host R,G,B,A = d>>8, d, 0, d>>16). Lets a deferred renderer that
+     * reconstructs position from its depth buffer skip the GPU->guest round
+     * trip. 0 when unsupported. */
+    u32  (*depth_argb_snapshot)(void* user, u32 depth, u32 w, u32 h);
 
     /* Pipelines, from the decompilers' HLSL plus the state that selects a
      * variant. This is the one call that hides D3DCompile against glslang
