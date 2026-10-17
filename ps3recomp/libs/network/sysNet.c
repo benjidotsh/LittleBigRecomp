@@ -374,6 +374,7 @@ static int p2p_send(const void* buf, uint32_t len, const uint8_t ip[4], uint16_t
 
 int32_t sys_net_bnet_close(int32_t s)
 {
+    if (net_trace()) printf("[sys_net] socketclose(%d)\n", s);
     if (!valid_socket(s)) return fail(SYS_NET_EBADF);
     if (s == s_p2p_dgram) {
         s_p2p_dgram = -1;
@@ -1061,6 +1062,7 @@ int32_t sys_net_get_sockinfo(int32_t s, uint32_t p, int32_t n)
         vm_write32(r + 0x18, ntohl(rm.sin_addr.s_addr));
         vm_write32(r + 0x1C, ntohs(rm.sin_port));
         vm_write32(r + 0x20, s_sockets[i].listening ? 4 : (peer || s_sockets[i].connected) ? 7 : 2);
+        if (net_trace()) printf("[sys_net] get_sockinfo(%d) state=%u\n", i, vm_read32(r + 0x20));
         done++;
     }
     return done;

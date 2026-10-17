@@ -451,6 +451,7 @@ static struct SpursInst {
     HANDLE coordinator;
     struct SpursPmSlot slots[6];
     u8 active[16], idle[16];
+    u32 runs[16];   /* policy-module dispatches per workload (SPURS_KTRACE) */
     u32 cursor, pass_no;
 } s_inst[MAX_SPURS_INST];
 static SRWLOCK s_inst_directory_lock = SRWLOCK_INIT;
@@ -1741,10 +1742,24 @@ static DWORD WINAPI spurs_kernel_thread(LPVOID p)
                 vm_base[ea + SPURS_WKL_CURCONT + wid] = si->active[wid];
                 ef_line_end(ea);
                 slot->busy = 1;
+                si->runs[wid]++;
                 WakeAllConditionVariable(&si->wake);
                 break;
             }
         }
+        /* SPURS_KTRACE=1: every ~2 s, one line per live workload -- whether the
+         * title kicked it and whether the kernel ran its policy module. */
+        { static int kt = -1; if (kt < 0) kt = getenv("SPURS_KTRACE") ? 1 : 0;
+          if (kt && (si->pass_no % 2000) == 0) {
+              u32 sig = vm_read16(ea + SPURS_WKL_SIGNAL1);
+              for (u32 w = 0; w < 16; w++) {
+                  if (!s_workloads[w].in_use || s_workloads[w].spurs_ea != ea) continue;
+                  fprintf(stderr, "[ktrace] %s wid=%u en=%u state=%u ready=%u sig=%u active=%u idle=%u runs=%u\n",
+                          si->prefix, w, !!(enabled & (0x80000000u >> w)),
+                          vm_read8(ea + SPURS_WKL_STATE1 + w), vm_read8(ea + SPURS_WKL_READY1 + w),
+                          !!(sig & (0x8000u >> w)), si->active[w], si->idle[w], si->runs[w]);
+              }
+          } }
         ReleaseSRWLockExclusive(&s_workload_registry_lock);
     }
     ReleaseSRWLockExclusive(&si->lock);

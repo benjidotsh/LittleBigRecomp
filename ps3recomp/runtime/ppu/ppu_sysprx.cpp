@@ -851,7 +851,9 @@ extern "C" void ppu_sysprx_register(void)
     /* PS3_NET_ONLINE: real host sockets (libs/network/sysNet.c). Registered
      * first because the first registration of a NID wins, so these shadow the
      * offline model below; without the variable nothing changes. */
-    if (getenv("PS3_NET_ONLINE")) ps3_net_host_register(gcm_guest_alloc);
+    /* PS3_NET_SOCKETS: the same host sockets with cellNetCtl left offline --
+     * enough for a title that runs its own session over loopback. */
+    if (getenv("PS3_NET_ONLINE") || getenv("PS3_NET_SOCKETS")) ps3_net_host_register(gcm_guest_alloc);
     /* sceNpScore ranking calls take up to 15 arguments: the ones past r10
      * come off the stack, so they need the full context. */
     np_score_register_ctx();

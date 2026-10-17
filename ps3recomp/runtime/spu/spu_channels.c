@@ -814,7 +814,7 @@ void spu_wrch(spu_context* ctx, uint32_t channel, u128 value)
          * long-missing producer for event_status (previously only ever cleared
          * via WrEventAck -> RdEventStat waits could never complete). */
         if (channel == MFC_WrTagUpdate && v != 0 && (ctx->event_mask & 0x1u)) {
-            ctx->event_status |= 0x1u;
+            __atomic_fetch_or(&ctx->event_status, 0x1u, __ATOMIC_SEQ_CST);
             spu_ch_wake(ctx);
         }
         return;
@@ -871,8 +871,19 @@ void spu_wrch(spu_context* ctx, uint32_t channel, u128 value)
          * it still holds a reservation it has already lost, which is the parked
          * SPURS kernel this whole mechanism exists to wake. */
         spu_lockline_lock();
-        ctx->event_status &= ~v;
+        __atomic_fetch_and(&ctx->event_status, ~v, __ATOMIC_SEQ_CST);
+        /* Stall-and-notify is level-triggered on the MFC: it stays pending while
+         * a stall notification sits unread in MFC_RdListStallStat (RPCS3
+         * re-raises SPU_EVENT_SN from ch_stall_stat). An ack that lands before
+         * the handler reads the channel must not lose it -- LBP's WWS policy
+         * module acks, declines a stall while its load-job state is idle, and
+         * then waits for that list's tag forever. */
+        if (ctx->list_stall_stat) __atomic_fetch_or(&ctx->event_status, 0x2u, __ATOMIC_SEQ_CST);
         spu_lockline_unlock();
+        { static int st = -1; if (st < 0) st = getenv("SPU_SNTRACE") ? 1 : 0;
+          if (st && (v & 2)) fprintf(stderr, "[sn] ack img=%d ctx=%p v=0x%X stat=0x%X parked=0x%X -> events=0x%X pc=0x%05X\n",
+                                     ctx->image_id, (void*)ctx, v, ctx->list_stall_stat, ctx->list_stall_mask,
+                                     ctx->event_status, (unsigned)ctx->pc & 0x3FFFF); }
         break;
     case SPU_WrSRR0:         ctx->srr0 = v;                                 break;
     default:
@@ -932,7 +943,7 @@ static void spu_resv_lost_poll(spu_context* ctx)
     if (!vm_base || ctx->resv_ea == 0) return;
     if (memcmp(vm_base + ctx->resv_ea, ctx->resv_line, 128) != 0) {
         ctx->resv_valid = 0;
-        ctx->event_status |= 0x400u;
+        __atomic_fetch_or(&ctx->event_status, 0x400u, __ATOMIC_SEQ_CST);
     }
 }
 

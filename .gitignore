@@ -17,3 +17,4 @@ frames/
 run/
 __pycache__/
 gamedata/
+spu_miss/

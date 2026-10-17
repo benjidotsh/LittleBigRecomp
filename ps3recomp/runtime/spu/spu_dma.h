@@ -794,7 +794,10 @@ static inline int mfc_run_list(spu_context* spu, uint32_t elem_lsa,
             spu->list_stall_cmd[t]       = base_cmd;
             spu->list_stall_mask |= (1u << t);  /* this tag now has a parked list */
             spu->list_stall_stat |= (1u << t);  /* accumulate into the notify mask */
-            spu->event_status    |= 0x2u;       /* SPU_EVENT_SN stall-and-notify */
+            __atomic_fetch_or(&spu->event_status, 0x2u, __ATOMIC_SEQ_CST);       /* SPU_EVENT_SN stall-and-notify */
+            { static int st = -1; if (st < 0) st = getenv("SPU_SNTRACE") ? 1 : 0;
+              if (st) fprintf(stderr, "[sn] raise img=%d ctx=%p tag=%u stat=0x%X parked=0x%X\n",
+                              spu->image_id, (void*)spu, t, spu->list_stall_stat, spu->list_stall_mask); }
             /* Real MFC runs a queued list asynchronously, so the notify lands
              * AFTER the arming code finishes. We run it inline here, so hold the
              * resulting interrupt off for a few drain ticks -- otherwise the WWS
@@ -1582,6 +1585,27 @@ static inline void mfc_channel_write(mfc_engine* mfc, spu_context* spu,
         break;
     case MFC_WrTagUpdate:
         spu->mfc_tag_status = mfc_tag_wait(mfc, spu->mfc_tag_mask, value);
+        /* SPU_TAGSTUCK=1: one dump per thread when the same incomplete tag
+         * mask has been polled 200k times in a row (a livelocked wait). */
+        { static int s_ts = -1; if (s_ts < 0) s_ts = getenv("SPU_TAGSTUCK") ? 1 : 0;
+          static __thread unsigned s_cnt, s_mask, s_done;
+          if (s_ts && !s_done) {
+              if (spu->mfc_tag_status != spu->mfc_tag_mask && spu->mfc_tag_mask == s_mask) {
+                  if (++s_cnt == 200000) {
+                      s_done = 1;
+                      fprintf(stderr, "[tagstuck] img=%d mask=0x%X completed=0x%X parked=0x%X stallstat=0x%X "
+                              "events=0x%X evmask=0x%X int_en=%d policy=%d queue=%u\n",
+                              spu->image_id, spu->mfc_tag_mask, mfc->tag_completed,
+                              spu->list_stall_mask, spu->list_stall_stat, spu->event_status,
+                              spu->event_mask, spu->int_enable, spu->policy_mode, mfc->queue_count);
+                      fprintf(stderr, "[tagstuck] LS[0x12A0..0x1300]:");
+                      for (int i = 0x12A0; i < 0x1300; i += 4)
+                          fprintf(stderr, "%s%02X%02X%02X%02X", (i & 15) ? " " : "\n   ",
+                                  spu->ls[i], spu->ls[i+1], spu->ls[i+2], spu->ls[i+3]);
+                      fprintf(stderr, "\n");
+                  }
+              } else { s_cnt = 0; s_mask = spu->mfc_tag_mask; }
+          } }
         /* WWS Run-promotion gate probe: after kCommandsExecuted the job manager
          * only calls ChangeLoadToRunJob if `ceq(RdTagStat, tagMask)` holds, i.e.
          * RdTagStat must equal the mask EXACTLY (mask 2 = tag 1 =
@@ -1619,6 +1643,8 @@ static inline uint32_t mfc_channel_read(mfc_engine* mfc, spu_context* spu,
          * handler's IhcLoop then drains every set bit, acking each via ch26. */
         uint32_t m = spu->list_stall_stat;
         spu->list_stall_stat = 0;
+        { static int st = -1; if (st < 0) st = getenv("SPU_SNTRACE") ? 1 : 0;
+          if (st) fprintf(stderr, "[sn] read-stat img=%d ctx=%p -> 0x%X\n", spu->image_id, (void*)spu, m); }
         return m;
     }
     case MFC_RdAtomicStat:

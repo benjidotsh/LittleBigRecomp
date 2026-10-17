@@ -11,5 +11,5 @@ export PS3_DEV_FLASH="${PS3_DEV_FLASH:-$HOME/Library/Application Support/rpcs3/d
 export SPU_INTERP_UNLIFTED="${SPU_INTERP_UNLIFTED:-1}"
 # LBP runs even single-player as a local network session over loopback
 # sockets; the offline libnet model leaves those calls unanswered.
-export PS3_NET_ONLINE="${PS3_NET_ONLINE:-1}"
+export PS3_NET_SOCKETS="${PS3_NET_SOCKETS:-1}"
 exec ./build/LittleBigRecomp game/EBOOT.elf "$@"
