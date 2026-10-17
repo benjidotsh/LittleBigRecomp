@@ -1,5 +1,5 @@
 # LittleBigRecomp -- LittleBigPlanet (BCES00141, v02.00) statically recompiled
-# onto the ps3recomp runtime (vendored in ps3recomp/).
+# onto the ps3recomp runtime (git submodule in ps3recomp/, branch lbp).
 #
 #   tools/relift.sh                     # lift game/EBOOT.elf -> src/recomp, src/gen
 #   cmake -S . -B build -G Ninja && cmake --build build

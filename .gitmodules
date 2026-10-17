@@ -1,0 +1,4 @@
+[submodule "ps3recomp"]
+	path = ps3recomp
+	url = https://github.com/benjidotsh/ps3recomp
+	branch = lbp

@@ -5,8 +5,10 @@ native macOS arm64 executable. The game's PowerPC code is lifted to C++ ahead of
 time, and so is every SPU program it runs (FMOD, Bink, the WWS physics/job
 manager policy module and its 43 job modules, a voice-codec job). Everything is
 linked against the [ps3recomp](https://github.com/sp00nznet/ps3recomp) runtime,
-vendored in `ps3recomp/` (upstream commit `0fe7dbf`, MIT) with the fixes this
-port needed. Rendering goes through Metal.
+a git submodule in `ps3recomp/` tracking the `lbp` branch of
+[benjidotsh/ps3recomp](https://github.com/benjidotsh/ps3recomp) (upstream
+`0fe7dbf`, MIT, plus the fixes this port needed). Clone with
+`git clone --recursive`, or run `git submodule update --init`. Rendering goes through Metal.
 
 No game code, assets, keys or game-derived output are in this repository.
 
