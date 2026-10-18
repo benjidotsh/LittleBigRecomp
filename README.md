@@ -70,4 +70,6 @@ and SDL2 (`brew install sdl2`).
   `RSX_ZSAMPLE_LOG`, `PS3RECOMP_METAL_FRAME_DUMP=dir/f%05u.ppm` (every 120th
   present; `PS3RECOMP_METAL_FRAME_DUMP_FROM=<n>` and `_EVERY=<n>` pick the
   first one kept and the stride, e.g. `_EVERY=1` for consecutive frames).
+- `AUDIO_WAV=<file>` writes the final mix as raw f32le stereo 48 kHz;
+  `AUDIO_UNDERRUN=1` logs each time the host audio queue ran dry.
 - `tools/ppcdis.py`, `tools/fnstrings.py`, `tools/peek.sh` (tile frame dumps).
