@@ -20,9 +20,8 @@ recompiled SPU code), and loads **the first level, the Introduction**, where the
 game is live: it renders the level and answers the pad (START opens the
 in-level pause menu).
 
-Known limits: the Introduction shows magenta placeholder textures for its
-first ~20 s while textures stream in, an occasional frame flashes a bright
-wedge, and depth/stencil clears ignore the scissor. In-level the game holds
+Known limits: an occasional frame flashes a bright wedge, and depth/stencil
+clears ignore the scissor. In-level the game holds
 its 30 fps target. FMOD's runtime-relocated DSP plugins run through the SPU
 interpreter.
 
