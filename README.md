@@ -67,5 +67,7 @@ and SDL2 (`brew install sdl2`).
   each thread's last 64K function entries. `FN_DUMP_AT=<fn>[:n]` /
   `FN_DUMP_SEC=<s>` dump guest memory for `tools/memrd.py`.
 - `SPURS_KTRACE=1`, `SPU_TAGSTUCK=1`, `SPU_SNTRACE=1`, `RSX_TEX_LOG/RSX_TEX_DUMP`,
-  `RSX_ZSAMPLE_LOG`, `PS3RECOMP_METAL_FRAME_DUMP=dir/f%05u.ppm`.
+  `RSX_ZSAMPLE_LOG`, `PS3RECOMP_METAL_FRAME_DUMP=dir/f%05u.ppm` (every 120th
+  present; `PS3RECOMP_METAL_FRAME_DUMP_FROM=<n>` and `_EVERY=<n>` pick the
+  first one kept and the stride, e.g. `_EVERY=1` for consecutive frames).
 - `tools/ppcdis.py`, `tools/fnstrings.py`, `tools/peek.sh` (tile frame dumps).
